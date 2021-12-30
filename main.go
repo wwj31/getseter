@@ -128,10 +128,10 @@ package {package}
 
 `
 const tplget = `
-func (s *{receiver}) {funname}() {return} { return s.{val}}
+func (s *{receiver}) {funname}() {return} { return s.{val} }
 `
 
-const tplset = `func (s *{receiver}) Set{funname}(v {input}) { s.{val} = v; s.bool = true}
+const tplset = `func (s *{receiver}) Set{funname}(v {input}) { s.{val} = v; s.bool = true }
 `
 
 func outfile(output, packagename, struname string, valname, valtype []string) {
