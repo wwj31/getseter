@@ -1,4 +1,4 @@
-module getseter
+module github.com/wwj31/getseter
 
 go 1.17
 
