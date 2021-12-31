@@ -84,31 +84,21 @@ func inspectAST(file *ast.File, typeName string) (valName, valType []string) {
 						valName = append(valName, v.Name)
 					}
 
+					v,ok := switchPtrAndVal(field.Type)
+					if ok{
+						valType = append(valType,v)
+						continue
+					}
+
 					switch x := field.Type.(type) {
 					case *ast.BasicLit:
 						valType = append(valType, x.Value)
-					case *ast.Ident:
-						valType = append(valType, x.Name)
-					case *ast.StarExpr:
-						valType = append(valType, fmt.Sprintf("*%v", x.X.(*ast.Ident).Name))
 					case *ast.MapType:
 						key, _ := x.Key.(*ast.Ident)
-						var val string
-						switch v := x.Value.(type) {
-						case *ast.Ident:
-							val = v.Name
-						case *ast.StarExpr:
-							val = "*" + v.X.(*ast.Ident).Name
-						}
+						val,_ := switchPtrAndVal(x.Value)
 						valType = append(valType, fmt.Sprintf("map[%v]%v", key, val))
 					case *ast.ArrayType:
-						var val string
-						switch v := x.Elt.(type) {
-						case *ast.Ident:
-							val = v.Name
-						case *ast.StarExpr:
-							val = "*" + v.X.(*ast.Ident).Name
-						}
+						val,_ := switchPtrAndVal(x.Elt)
 						valType = append(valType, fmt.Sprintf("[]%v", val))
 					}
 				}
@@ -181,4 +171,17 @@ func strFirstToUpper(str string) string {
 		strArry[0] -= 32
 	}
 	return string(strArry)
+}
+
+func switchPtrAndVal(expr ast.Expr) (string,bool){
+	var val string
+	switch v := expr.(type) {
+	case *ast.Ident:
+		val = v.Name
+	case *ast.StarExpr:
+		val = "*" + v.X.(*ast.Ident).Name
+	default:
+		return "",false
+	}
+	return val,true
 }
