@@ -33,14 +33,14 @@ func main() {
 func genFile(typ string) {
 	var (
 		packName         string
-		valName, valType []string
+		valName,valType,getModify []string
 	)
 	pack := parsePackage(nil, nil)
 	for _, astFile := range pack.Syntax {
 		for name, _ := range astFile.Scope.Objects {
 			if name == typ {
 				packName = astFile.Name.Name
-				valName, valType = inspectAST(astFile, name)
+				valName, valType,getModify = inspectAST(astFile, name)
 				goto result
 			}
 		}
@@ -48,7 +48,7 @@ func genFile(typ string) {
 
 result:
 	outputName := filepath.Join("./", strings.ToLower(fmt.Sprintf("attr_%s.go", typ)))
-	outfile(outputName, packName, typ, valName, valType)
+	outfile(outputName, packName, typ, valName, valType, getModify)
 }
 
 // parsePackage analyzes the single package constructed from the patterns and tags.
@@ -68,7 +68,7 @@ func parsePackage(patterns []string, tags []string) *packages.Package {
 	return pkgs[0]
 }
 
-func inspectAST(file *ast.File, typeName string) (valName, valType []string) {
+func inspectAST(file *ast.File, typeName string) (valName, valType,valGetModify []string) {
 	var name string
 	// Inspect the AST and print all identifiers and literals.
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -84,22 +84,29 @@ func inspectAST(file *ast.File, typeName string) (valName, valType []string) {
 						valName = append(valName, v.Name)
 					}
 
-					v,ok := switchPtrAndVal(field.Type)
-					if ok{
+					var bmap bool
+					v,bptr := switchPtrAndVal(field.Type)
+					if v != ""{
 						valType = append(valType,v)
-						continue
+					}else{
+						switch x := field.Type.(type) {
+						case *ast.BasicLit:
+							valType = append(valType, x.Value)
+						case *ast.MapType:
+							key, _ := x.Key.(*ast.Ident)
+							val,_ := switchPtrAndVal(x.Value)
+							valType = append(valType, fmt.Sprintf("map[%v]%v", key, val))
+							bmap = true
+						case *ast.ArrayType:
+							val,_ := switchPtrAndVal(x.Elt)
+							valType = append(valType, fmt.Sprintf("[]%v", val))
+						}
 					}
 
-					switch x := field.Type.(type) {
-					case *ast.BasicLit:
-						valType = append(valType, x.Value)
-					case *ast.MapType:
-						key, _ := x.Key.(*ast.Ident)
-						val,_ := switchPtrAndVal(x.Value)
-						valType = append(valType, fmt.Sprintf("map[%v]%v", key, val))
-					case *ast.ArrayType:
-						val,_ := switchPtrAndVal(x.Elt)
-						valType = append(valType, fmt.Sprintf("[]%v", val))
+					if *seter && (bptr || bmap) {
+						valGetModify = append(valGetModify,tplgetmodify)
+					}else{
+						valGetModify = append(valGetModify,"")
 					}
 				}
 				return false
@@ -108,23 +115,26 @@ func inspectAST(file *ast.File, typeName string) (valName, valType []string) {
 		return true
 	})
 	if len(valName) != len(valType) {
-		return nil, nil
+		return nil, nil,nil
 	}
-	return valName, valType
+	return valName, valType,valGetModify
 }
 
 const tplpackage = `{comment}
 package {package}
 
 `
+
+const tplgetmodify = `s.bool = true;`
+
 const tplget = `
-func (s *{receiver}) {funname}() {return} { return s.{val} }
+func (s *{receiver}) {funname}() {return} { {modify} return s.{val} }
 `
 
-const tplset = `func (s *{receiver}) Set{funname}(v {input}) { s.{val} = v; s.bool = true }
+const tplset = `func (s *{receiver}) Set{funname}(v {input}) { {modify} s.{val} = v }
 `
 
-func outfile(output, packagename, struname string, valname, valtype []string) {
+func outfile(output, packagename, struname string, valname, valtype, getmodify []string) {
 	_ = os.Remove(output)
 	file, err := os.Create(output)
 	if err != nil {
@@ -141,6 +151,7 @@ func outfile(output, packagename, struname string, valname, valtype []string) {
 			continue
 		}
 		typ := valtype[i]
+		modify := getmodify[i]
 
 		// provide get func
 		context += strings.NewReplacer([]string{
@@ -148,15 +159,17 @@ func outfile(output, packagename, struname string, valname, valtype []string) {
 			"{funname}", strFirstToUpper(val),
 			"{return}", typ,
 			"{val}", val,
+			"{modify}",modify,
 		}...).Replace(tplget)
 
-		if *seter && val != "bool" {
+		if *seter && val != "bool" && modify == ""{
 			// provide set func
 			context += strings.NewReplacer([]string{
 				"{receiver}", struname,
 				"{funname}", strFirstToUpper(val),
 				"{input}", typ,
 				"{val}", val,
+				"{modify}",tplgetmodify,
 			}...).Replace(tplset)
 		}
 	}
@@ -174,14 +187,18 @@ func strFirstToUpper(str string) string {
 }
 
 func switchPtrAndVal(expr ast.Expr) (string,bool){
-	var val string
+	var (
+		val string
+		ptr bool
+	)
 	switch v := expr.(type) {
 	case *ast.Ident:
 		val = v.Name
 	case *ast.StarExpr:
 		val = "*" + v.X.(*ast.Ident).Name
+		ptr = true
 	default:
 		return "",false
 	}
-	return val,true
+	return val,ptr
 }
